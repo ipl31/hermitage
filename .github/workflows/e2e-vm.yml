@@ -74,3 +74,68 @@ jobs:
             exit 1
           fi
           echo "PASS: guest reached ready state and powered off (clean teardown)"
+
+  # Build the aarch64-linux guest on a native ARM Linux runner and export its
+  # closure, so the macOS job can boot it without a (impossible) Linux builder.
+  build-guest-aarch64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+        with:
+          extra-conf: |
+            experimental-features = nix-command flakes
+      - name: Build aarch64-linux CI runner closure
+        run: nix build .#packages.aarch64-linux.ci-runner --print-build-logs --out-link ci-runner-linux
+      - name: Export closure to a file-based binary cache
+        run: |
+          set -euo pipefail
+          mkdir -p closure
+          nix copy --to "file://$PWD/closure" ./ci-runner-linux
+          tar -C closure -czf guest-closure-aarch64.tgz .
+          ls -lh guest-closure-aarch64.tgz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: guest-closure-aarch64
+          path: guest-closure-aarch64.tgz
+          retention-days: 1
+
+  # Boot the same guest on a GitHub-hosted macOS runner via QEMU+TCG (vfkit/VZ
+  # nested virt is unavailable on hosted macOS runners). The darwin qemu runner
+  # reuses the imported aarch64-linux guest; accel=hvf:tcg falls back to TCG.
+  boot-macos-tcg:
+    needs: build-guest-aarch64
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+        with:
+          extra-conf: |
+            experimental-features = nix-command flakes
+      - uses: actions/download-artifact@v4
+        with:
+          name: guest-closure-aarch64
+      - name: Import guest closure into the local store
+        run: |
+          set -euo pipefail
+          mkdir -p closure
+          tar -C closure -xzf guest-closure-aarch64.tgz
+          nix copy --no-check-sigs --from "file://$PWD/closure" --all
+      - name: Build the darwin QEMU runner (guest already imported)
+        run: nix build .#packages.aarch64-darwin.ci-runner --print-build-logs --out-link result-ci
+      - name: Boot the microVM under TCG, assert readiness + teardown
+        run: |
+          set -euo pipefail
+          echo "===== microvm-run script ====="; cat result-ci/bin/microvm-run || true
+          echo "=============================="
+          workdir="$(mktemp -d)"; cd "$workdir"
+          set +e
+          timeout 900 "$GITHUB_WORKSPACE/result-ci/bin/microvm-run" 2>&1 | tee boot.log
+          rc=$?
+          set -e
+          echo "runner exit code: $rc"
+          if ! grep -q "HERMIT_CI_VM_READY" boot.log; then
+            echo "FAIL: readiness marker not found in console output"
+            exit 1
+          fi
+          echo "PASS: guest booted under QEMU/TCG on macOS and powered off (clean teardown)"

@@ -30,10 +30,20 @@
         system = "aarch64-linux";
       };
 
+      # aarch64-linux guest, but with a DARWIN-hosted qemu runner so it can boot
+      # under QEMU+TCG on a macOS CI runner (vfkit/VZ is unavailable there).
+      nixosConfigurations.hermit-ci-darwin = import ./nix/guest-ci.nix {
+        inherit nixpkgs microvm;
+        system = "aarch64-linux";
+        vmHostPackages = nixpkgs.legacyPackages.aarch64-darwin;
+      };
+
       packages.${hostSystem} = {
         hermit = self.nixosConfigurations.hermit.config.microvm.declaredRunner;
         hermit-vm = pkgs.callPackage ./cli/package.nix { };
         default = self.packages.${hostSystem}.hermit-vm;
+        # darwin-hosted qemu runner for the CI boot test
+        ci-runner = self.nixosConfigurations.hermit-ci-darwin.config.microvm.declaredRunner;
       };
 
       # CI runner packages, exposed under the matching Linux host systems.
