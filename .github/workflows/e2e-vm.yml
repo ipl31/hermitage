@@ -87,17 +87,15 @@ jobs:
             experimental-features = nix-command flakes
       - name: Build aarch64-linux CI runner closure
         run: nix build .#packages.aarch64-linux.ci-runner --print-build-logs --out-link ci-runner-linux
-      - name: Export closure to a file-based binary cache
+      - name: Export the full closure as a NAR stream
         run: |
           set -euo pipefail
-          mkdir -p closure
-          nix copy --to "file://$PWD/closure" ./ci-runner-linux
-          tar -C closure -czf guest-closure-aarch64.tgz .
-          ls -lh guest-closure-aarch64.tgz
+          nix-store --export $(nix-store -qR ./ci-runner-linux) | gzip > guest-closure-aarch64.nar.gz
+          ls -lh guest-closure-aarch64.nar.gz
       - uses: actions/upload-artifact@v4
         with:
           name: guest-closure-aarch64
-          path: guest-closure-aarch64.tgz
+          path: guest-closure-aarch64.nar.gz
           retention-days: 1
 
   # Boot the same guest on a GitHub-hosted macOS runner via QEMU+TCG (vfkit/VZ
@@ -118,9 +116,7 @@ jobs:
       - name: Import guest closure into the local store
         run: |
           set -euo pipefail
-          mkdir -p closure
-          tar -C closure -xzf guest-closure-aarch64.tgz
-          nix copy --no-check-sigs --from "file://$PWD/closure" --all
+          gunzip -c guest-closure-aarch64.nar.gz | nix-store --import
       - name: Build the darwin QEMU runner (guest already imported)
         run: nix build .#packages.aarch64-darwin.ci-runner --print-build-logs --out-link result-ci
       - name: Boot the microVM under TCG, assert readiness + teardown
