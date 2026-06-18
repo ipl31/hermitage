@@ -124,8 +124,14 @@ jobs:
           set -uo pipefail
           echo "===== microvm-run script ====="; cat result-ci/bin/microvm-run || true
           echo "=============================="
-          runner="$GITHUB_WORKSPACE/result-ci/bin/microvm-run"
           workdir="$(mktemp -d)"; cd "$workdir"
+          # Hosted macOS runners have no Hypervisor.framework, and QEMU's
+          # accel=hvf:tcg does NOT fall back (hvf aborts with HV_UNSUPPORTED).
+          # Force pure TCG by rewriting the generated runner's machine flag.
+          runner="$workdir/microvm-run-tcg"
+          sed 's/accel=hvf:tcg/accel=tcg/g' "$GITHUB_WORKSPACE/result-ci/bin/microvm-run" > "$runner"
+          chmod +x "$runner"
+          echo "----- forced-TCG run line -----"; grep -- '-M ' "$runner" || true
           # macOS has no GNU `timeout`; run in background and poll. The guest
           # powers itself off after printing the marker, so the runner exits on
           # its own (clean teardown); the kill below is only a safety net.
