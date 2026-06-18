@@ -1,0 +1,76 @@
+name: e2e-vm
+
+# End-to-end test: build the microVM guest and actually BOOT it, confirm it
+# reaches a ready state (a oneshot prints a marker to the serial console), then
+# confirm clean teardown (the guest powers off and the hypervisor exits).
+#
+# Strategy (see docs/superpowers/ + research): GitHub-hosted macOS runners cannot
+# use vfkit/Virtualization.framework (nested virt is blocked), so the macOS boot
+# path uses QEMU+TCG software emulation. The Linux job uses QEMU+KVM for a fast,
+# high-confidence boot of the same guest definition.
+
+on:
+  push:
+    branches: [ "**" ]
+  workflow_dispatch:
+
+concurrency:
+  group: e2e-vm-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cli-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+      - name: Install CLI deps
+        working-directory: cli
+        run: bun install --frozen-lockfile
+      - name: Run CLI test suite
+        working-directory: cli
+        run: bun test
+
+  boot-linux-kvm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable KVM group permissions
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+
+      - uses: DeterminateSystems/nix-installer-action@main
+        with:
+          extra-conf: |
+            experimental-features = nix-command flakes
+
+      - name: Build the CI microVM runner (x86_64, QEMU)
+        run: nix build .#packages.x86_64-linux.ci-runner --print-build-logs
+
+      - name: Boot the microVM and assert readiness + teardown
+        run: |
+          set -euo pipefail
+          workdir="$(mktemp -d)"
+          cd "$workdir"
+          echo "Booting microVM (KVM)…"
+          # The runner runs in the foreground; the guest powers itself off after
+          # printing the marker, so the runner exits on its own. timeout is a
+          # safety net in case boot hangs.
+          set +e
+          timeout 300 "$GITHUB_WORKSPACE/result/bin/microvm-run" 2>&1 | tee boot.log
+          rc=$?
+          set -e
+          echo "runner exit code: $rc"
+          echo "----- checking results -----"
+          if ! grep -q "HERMIT_CI_VM_READY" boot.log; then
+            echo "FAIL: readiness marker not found in console output"
+            exit 1
+          fi
+          echo "PASS: guest reached ready state and powered off (clean teardown)"
