@@ -121,17 +121,31 @@ jobs:
         run: nix build .#packages.aarch64-darwin.ci-runner --print-build-logs --out-link result-ci
       - name: Boot the microVM under TCG, assert readiness + teardown
         run: |
-          set -euo pipefail
+          set -uo pipefail
           echo "===== microvm-run script ====="; cat result-ci/bin/microvm-run || true
           echo "=============================="
+          runner="$GITHUB_WORKSPACE/result-ci/bin/microvm-run"
           workdir="$(mktemp -d)"; cd "$workdir"
-          set +e
-          timeout 900 "$GITHUB_WORKSPACE/result-ci/bin/microvm-run" 2>&1 | tee boot.log
-          rc=$?
-          set -e
-          echo "runner exit code: $rc"
-          if ! grep -q "HERMIT_CI_VM_READY" boot.log; then
-            echo "FAIL: readiness marker not found in console output"
-            exit 1
+          # macOS has no GNU `timeout`; run in background and poll. The guest
+          # powers itself off after printing the marker, so the runner exits on
+          # its own (clean teardown); the kill below is only a safety net.
+          "$runner" > boot.log 2>&1 &
+          pid=$!
+          ready=0; self_exit=0
+          for _ in $(seq 1 180); do        # up to 180 * 5s = 900s
+            if grep -q "HERMIT_CI_VM_READY" boot.log; then ready=1; fi
+            if ! kill -0 "$pid" 2>/dev/null; then self_exit=1; break; fi
+            [ "$ready" = 1 ] && break
+            sleep 5
+          done
+          # give a self-powering-off guest a moment to exit cleanly
+          if [ "$self_exit" = 0 ]; then
+            for _ in $(seq 1 12); do kill -0 "$pid" 2>/dev/null || { self_exit=1; break; }; sleep 5; done
           fi
-          echo "PASS: guest booted under QEMU/TCG on macOS and powered off (clean teardown)"
+          kill "$pid" 2>/dev/null || true
+          wait "$pid" 2>/dev/null || true
+          echo "----- boot.log (tail) -----"; tail -60 boot.log || true
+          echo "---------------------------"
+          grep -q "HERMIT_CI_VM_READY" boot.log || { echo "FAIL: readiness marker not found"; exit 1; }
+          echo "readiness: OK; self-powered-off (clean teardown): $([ "$self_exit" = 1 ] && echo yes || echo 'no — killed by safety net')"
+          echo "PASS: guest booted under QEMU/TCG on macOS"
