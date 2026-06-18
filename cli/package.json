@@ -1,0 +1,8 @@
+{
+  "name": "hermit-vm",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": { "hermit-vm": "./src/index.ts" },
+  "devDependencies": { "@types/bun": "latest" },
+  "dependencies": { "yaml": "^2.5.0" }
+}

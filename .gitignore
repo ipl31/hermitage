@@ -1,0 +1,16 @@
+# Nix
+result
+result-*
+.direnv/
+
+# CLI
+cli/node_modules/
+*.tsbuildinfo
+
+# Local VM state (never commit)
+*.img
+*.sock
+
+# Secrets (never commit real ones; keep the example)
+*.env
+!docs/secrets.example.env

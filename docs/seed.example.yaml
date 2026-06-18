@@ -1,0 +1,15 @@
+# docs/seed.example.yaml
+name: my-hermit                 # VM + state-dir name ([a-z0-9-], <=63 chars)
+agent_name: Hermit
+timezone: America/New_York
+channels:
+  discord:
+    enabled: true
+    channel_id: "123456789012345678"
+    allowed_users: ["234567890123456789"]
+    morning_brief: "07:00"
+routines: []
+hatch_prompt: |
+  Set yourself up as a helpful dev assistant for this project.
+  Use balanced escalation. Announce readiness in Discord when ready.
+secrets_file: ./secrets.env
