@@ -1,5 +1,4 @@
 import { writeFile, readFile, appendFile } from "node:fs/promises";
-import { openSync } from "node:fs";
 import { join } from "node:path";
 import type { CliDeps } from "./cli";
 import type { VmPaths } from "./state";
@@ -15,13 +14,14 @@ export async function buildRunner(deps: CliDeps): Promise<string> {
 }
 
 export async function launchVm(_deps: CliDeps, runnerPath: string, paths: VmPaths): Promise<number> {
-  const logFd = openSync(paths.logFile, "a");
-  const proc = Bun.spawn([join(runnerPath, "bin", "microvm-run")], {
-    cwd: paths.root,
-    stdout: logFd,
-    stderr: logFd,
-    stdin: "ignore",
-  });
+  // The vfkit runner attaches the guest console to stdio, which requires a real
+  // TTY (a plain pipe makes vfkit abort with "operation not supported by
+  // device"). Wrap the runner in a pseudo-TTY via macOS's BSD `script`, which
+  // also captures the console to the log file.
+  const proc = Bun.spawn(
+    ["/usr/bin/script", "-q", paths.logFile, join(runnerPath, "bin", "microvm-run")],
+    { cwd: paths.root, stdout: "ignore", stderr: "ignore", stdin: "ignore" },
+  );
   proc.unref();
   await writeFile(join(paths.root, "vm.pid"), String(proc.pid));
   return proc.pid;
