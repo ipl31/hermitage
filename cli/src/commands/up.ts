@@ -10,6 +10,13 @@ import { renderHostState } from "../render";
 import { preflight } from "../preflight";
 import { buildRunner, launchVm } from "../vm";
 import { pollStatus } from "../status";
+import type { Status } from "../status";
+
+export function successPhase(s: Status | null): "ok" | "pair" | "fail" {
+  if (s?.phase === "running") return "ok";
+  if (s?.phase === "awaiting_pairing") return "pair";
+  return "fail";
+}
 
 export function wantsRehatch(argv: string[]): boolean {
   return argv.includes("--rehatch");
@@ -61,15 +68,21 @@ registerCommand("up", async (argv: string[], deps: CliDeps): Promise<number> => 
 
   deps.log("launching microVM...");
   const pid = await launchVm(deps, runner, paths);
-  deps.log(`microVM started (pid ${pid}); waiting for status=ready...`);
+  deps.log("waiting for the agent to come up (build + bootstrap + hatch can take several minutes)...");
 
-  const s = await pollStatus(paths, "ready", 120_000);
-  if (s?.phase === "ready") {
-    deps.log(`✅ ${seed.name} is ready.`);
-    deps.log(`   status: ${paths.statusFile}`);
-    deps.log(`   logs:   hermit-vm logs ${seed.name}`);
+  const s = await pollStatus(paths, "running", 1_200_000); // up to 20 min on first hatch
+  const cls = successPhase(s);
+  if (cls === "ok") {
+    deps.log(`✅ ${seed.name} is running.`);
+    if (seed.channels?.discord?.enabled) {
+      deps.log("Discord: DM the bot once to pair, then run /discord:access pair <code> in its DM.");
+    }
     return 0;
   }
-  deps.error(`timed out waiting for ready (last phase: ${s?.phase ?? "none"}). See: hermit-vm logs ${seed.name}`);
+  if (cls === "pair") {
+    deps.log(`🔗 ${seed.name} is up but awaiting Discord pairing. DM the bot to complete it.`);
+    return 0;
+  }
+  deps.error(`agent did not reach 'running' (last: ${s?.phase ?? "none"}${s?.error ? ", error: " + s.error : ""}). See: hermit-vm logs ${seed.name}`);
   return 1;
 });
