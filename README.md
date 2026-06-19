@@ -19,4 +19,28 @@ nix run .#hermit-vm -- down my-hermit --wipe
 
 State lives under `~/.local/share/hermit-vm/<name>/`.
 
+## End-to-end VM boot test
+
+Prove the microVM actually boots and tears down — same guest definition, three environments:
+
+```bash
+# Local, on bare-metal Apple Silicon: boots via REAL vfkit (Virtualization.framework)
+nix run .#e2e-local
+```
+
+`e2e-local` builds the guest (via the local `aarch64-linux` builder), boots it under
+vfkit, waits for the `HERMIT_CI_VM_READY` console marker, and confirms the guest
+powers itself off (clean teardown). On bare metal this exercises the real product
+hypervisor.
+
+The local builder is a native VZ builder (`nix-rosetta-builder`). A ready-to-use
+nix-darwin config + setup steps are vendored in [`nix/darwin-builder/`](nix/darwin-builder/).
+
+In CI (`.github/workflows/e2e-vm.yml`) the same guest is booted on:
+- an **x86 Linux** runner via QEMU+**KVM** (fast), and
+- a **macOS** runner via QEMU+**TCG** (hosted macOS can't use vfkit — nested virt is blocked).
+
+See `docs/local-linux-builder-status.md` for the local builder setup (and the
+qemu/HVF workaround it required).
+
 > **Warning:** `down <name> --wipe` deletes the VM's state directory **without confirmation**. There is no prompt; the deletion is immediate and irreversible.
