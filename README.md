@@ -1,8 +1,15 @@
 # Hermit microVM Deployer
 
-Boot an isolated NixOS microVM on macOS (Apple Silicon) via vfkit, managed by a
-single `hermit-vm` CLI. **Plan 1 scope:** an empty (Hermit-free) VM that proves
-the full host↔guest plumbing. Hermit itself lands in Plan 2.
+Boot an isolated NixOS microVM on macOS (Apple Silicon) via vfkit that runs a
+fully-bootstrapped claude-code-hermit agent. On first boot it pre-seeds auth +
+plugins + onboarding/trust bypass, runs `/claude-code-hermit:hatch <prompt>`,
+then keeps a never-ending session alive via systemd. The agent checks into its
+configured Discord channel when ready.
+
+## Commands
+- `hermit-vm up <seed.yaml> --secrets <file> [--rehatch]`
+- `hermit-vm status <name>` · `logs <name>` · `down <name> [--wipe]`
+- `hermit-vm reseed-auth <name> --secrets <file>`  (live auth rotation)
 
 ## Prerequisites
 - macOS on Apple Silicon, Nix with flakes enabled.
