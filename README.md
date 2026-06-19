@@ -33,6 +33,9 @@ vfkit, waits for the `HERMIT_CI_VM_READY` console marker, and confirms the guest
 powers itself off (clean teardown). On bare metal this exercises the real product
 hypervisor.
 
+The local builder is a native VZ builder (`nix-rosetta-builder`). A ready-to-use
+nix-darwin config + setup steps are vendored in [`nix/darwin-builder/`](nix/darwin-builder/).
+
 In CI (`.github/workflows/e2e-vm.yml`) the same guest is booted on:
 - an **x86 Linux** runner via QEMU+**KVM** (fast), and
 - a **macOS** runner via QEMU+**TCG** (hosted macOS can't use vfkit — nested virt is blocked).
