@@ -30,11 +30,16 @@ test("resolveAuth: oauth creds returns source + warning", () => {
   expect(r.warning).toContain("refresh");
 });
 
+test("resolveAuth throws when no auth source", () => {
+  expect(() => resolveAuth({})).toThrow();
+});
+
 test("claudeJson sets onboarding + trust + mcp", () => {
   const j = claudeJson("2.1.179", "/var/lib/hermit/project", ["discord"]) as any;
   expect(j.hasCompletedOnboarding).toBe(true);
   expect(j.lastOnboardingVersion).toBe("2.1.179");
   expect(j.projects["/var/lib/hermit/project"].hasTrustDialogAccepted).toBe(true);
+  expect(j.projects["/var/lib/hermit/project"].hasTrustDialogHooksAccepted).toBe(true);
   expect(j.enabledMcpjsonServers).toEqual(["discord"]);
 });
 
