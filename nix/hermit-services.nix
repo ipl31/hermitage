@@ -29,6 +29,21 @@ in {
     };
   };
 
+  systemd.paths.hermit-rehatch = {
+    wantedBy = [ "multi-user.target" ];
+    pathConfig.PathExists = "/run/hermit-runtime/rehatch-request";
+  };
+  systemd.services.hermit-rehatch = {
+    path = [ pkgs.coreutils pkgs.systemd ];
+    serviceConfig.Type = "oneshot";
+    script = ''
+      rm -f /var/lib/hermit/.hermit-initialized
+      systemctl start hermit-init.service
+      systemctl restart hermit-agent.service
+      rm -f /run/hermit-runtime/rehatch-request
+    '';
+  };
+
   systemd.services.hermit-agent = {
     description = "Hermit never-ending session";
     wantedBy = [ "multi-user.target" ];

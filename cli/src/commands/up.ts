@@ -11,6 +11,10 @@ import { preflight } from "../preflight";
 import { buildRunner, launchVm } from "../vm";
 import { pollStatus } from "../status";
 
+export function wantsRehatch(argv: string[]): boolean {
+  return argv.includes("--rehatch");
+}
+
 export function parseUpArgs(argv: string[]): { seedPath?: string; secretsPath?: string } {
   let seedPath: string | undefined;
   let secretsPath: string | undefined;
@@ -46,6 +50,11 @@ registerCommand("up", async (argv: string[], deps: CliDeps): Promise<number> => 
   const paths = stateDir(seed.name, homedir());
   deps.log(`rendering host state at ${paths.root}`);
   await renderHostState(paths, seed, secrets);
+
+  if (wantsRehatch(argv)) {
+    await Bun.write(`${paths.runtime}/rehatch-request`, new Date().toISOString());
+    deps.log("rehatch requested; the guest will re-run setup on next boot/now.");
+  }
 
   deps.log("building microVM runner (this can take a while on first run)...");
   const runner = await buildRunner(deps);
