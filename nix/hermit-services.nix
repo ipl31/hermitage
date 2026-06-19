@@ -38,7 +38,7 @@ in {
     serviceConfig.Type = "oneshot";
     script = ''
       rm -f /var/lib/hermit/.hermit-initialized
-      systemctl start hermit-init.service
+      systemctl restart hermit-init.service
       systemctl restart hermit-agent.service
       rm -f /run/hermit-runtime/rehatch-request
     '';

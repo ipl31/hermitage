@@ -60,7 +60,7 @@ registerCommand("up", async (argv: string[], deps: CliDeps): Promise<number> => 
 
   if (wantsRehatch(argv)) {
     await Bun.write(`${paths.runtime}/rehatch-request`, new Date().toISOString());
-    deps.log("rehatch requested; the guest will re-run setup on next boot/now.");
+    deps.log("rehatch requested; the guest will re-run setup on its next boot.");
   }
 
   deps.log("building microVM runner (this can take a while on first run)...");

@@ -58,12 +58,13 @@ export async function main(): Promise<void> {
   const channelMcp: string[] = [];
   const extraAgentEnv: Record<string, string> = {};
   if (discordEnabled) {
+    if (!secrets.DISCORD_BOT_TOKEN) {
+      throw new Error("discord channel enabled but DISCORD_BOT_TOKEN missing from seed secrets");
+    }
     const stateDir = join(VOL, "channels/discord");
     mkdirSync(stateDir, { recursive: true });
-    if (secrets.DISCORD_BOT_TOKEN) {
-      writeFileSync(join(stateDir, ".env"), `DISCORD_BOT_TOKEN=${secrets.DISCORD_BOT_TOKEN}\n`);
-      chmodSync(join(stateDir, ".env"), 0o600);
-    }
+    writeFileSync(join(stateDir, ".env"), `DISCORD_BOT_TOKEN=${secrets.DISCORD_BOT_TOKEN}\n`);
+    chmodSync(join(stateDir, ".env"), 0o600);
     // If the operator pre-paired elsewhere and shipped access.json, reuse it.
     const seededAccess = join(SEED, "secrets", "discord-access.json");
     if (existsSync(seededAccess)) copyFileSync(seededAccess, join(stateDir, "access.json"));
@@ -73,7 +74,7 @@ export async function main(): Promise<void> {
     const existing = existsSync(settingsLocal) ? JSON.parse(await Bun.file(settingsLocal).text()) : {};
     existing.env = { ...(existing.env ?? {}), DISCORD_STATE_DIR: stateDir };
     writeFileSync(settingsLocal, JSON.stringify(existing, null, 2));
-    extraAgentEnv.DISCORD_BOT_TOKEN = secrets.DISCORD_BOT_TOKEN ?? "";
+    extraAgentEnv.DISCORD_BOT_TOKEN = secrets.DISCORD_BOT_TOKEN;
     extraAgentEnv.DISCORD_STATE_DIR = stateDir;
     channelMcp.push("discord");
   }
