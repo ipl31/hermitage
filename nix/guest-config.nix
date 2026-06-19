@@ -3,7 +3,7 @@
 # host<->guest plumbing by writing a status file to the runtime share.
 { lib, pkgs, hypervisor, ... }:
 {
-  imports = [ ./status-writer.nix ];
+  imports = [ ./runtime-packages.nix ];
 
   networking.hostName = "hermit";
   system.stateVersion = "24.11";
