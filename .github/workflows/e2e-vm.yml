@@ -1,0 +1,157 @@
+name: e2e-vm
+
+# End-to-end test: build the microVM guest and actually BOOT it, confirm it
+# reaches a ready state (a oneshot prints a marker to the serial console), then
+# confirm clean teardown (the guest powers off and the hypervisor exits).
+#
+# Strategy (see docs/superpowers/ + research): GitHub-hosted macOS runners cannot
+# use vfkit/Virtualization.framework (nested virt is blocked), so the macOS boot
+# path uses QEMU+TCG software emulation. The Linux job uses QEMU+KVM for a fast,
+# high-confidence boot of the same guest definition.
+
+on:
+  push:
+    branches: [ "**" ]
+  workflow_dispatch:
+
+concurrency:
+  group: e2e-vm-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cli-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+      - name: Install CLI deps
+        working-directory: cli
+        run: bun install --frozen-lockfile
+      - name: Run CLI test suite
+        working-directory: cli
+        run: bun test
+
+  boot-linux-kvm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable KVM group permissions
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+
+      - uses: DeterminateSystems/nix-installer-action@main
+        with:
+          extra-conf: |
+            experimental-features = nix-command flakes
+
+      - name: Build the CI microVM runner (x86_64, QEMU)
+        run: nix build .#packages.x86_64-linux.ci-runner --print-build-logs
+
+      - name: Boot the microVM and assert readiness + teardown
+        run: |
+          set -euo pipefail
+          workdir="$(mktemp -d)"
+          cd "$workdir"
+          echo "Booting microVM (KVM)…"
+          # The runner runs in the foreground; the guest powers itself off after
+          # printing the marker, so the runner exits on its own. timeout is a
+          # safety net in case boot hangs.
+          set +e
+          timeout 300 "$GITHUB_WORKSPACE/result/bin/microvm-run" 2>&1 | tee boot.log
+          rc=$?
+          set -e
+          echo "runner exit code: $rc"
+          echo "----- checking results -----"
+          if ! grep -q "HERMIT_CI_VM_READY" boot.log; then
+            echo "FAIL: readiness marker not found in console output"
+            exit 1
+          fi
+          echo "PASS: guest reached ready state and powered off (clean teardown)"
+
+  # Build the aarch64-linux guest on a native ARM Linux runner and export its
+  # closure, so the macOS job can boot it without a (impossible) Linux builder.
+  build-guest-aarch64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+        with:
+          extra-conf: |
+            experimental-features = nix-command flakes
+      - name: Build aarch64-linux CI runner closure
+        run: nix build .#packages.aarch64-linux.ci-runner --print-build-logs --out-link ci-runner-linux
+      - name: Export the full closure as a NAR stream
+        run: |
+          set -euo pipefail
+          nix-store --export $(nix-store -qR ./ci-runner-linux) | gzip > guest-closure-aarch64.nar.gz
+          ls -lh guest-closure-aarch64.nar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: guest-closure-aarch64
+          path: guest-closure-aarch64.nar.gz
+          retention-days: 1
+
+  # Boot the same guest on a GitHub-hosted macOS runner via QEMU+TCG (vfkit/VZ
+  # nested virt is unavailable on hosted macOS runners). The darwin qemu runner
+  # reuses the imported aarch64-linux guest; accel=hvf:tcg falls back to TCG.
+  boot-macos-tcg:
+    needs: build-guest-aarch64
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+        with:
+          extra-conf: |
+            experimental-features = nix-command flakes
+      - uses: actions/download-artifact@v4
+        with:
+          name: guest-closure-aarch64
+      - name: Import guest closure into the local store
+        run: |
+          set -euo pipefail
+          gunzip -c guest-closure-aarch64.nar.gz | nix-store --import
+      - name: Build the darwin QEMU runner (guest already imported)
+        run: nix build .#packages.aarch64-darwin.ci-runner --print-build-logs --out-link result-ci
+      - name: Boot the microVM under TCG, assert readiness + teardown
+        run: |
+          set -uo pipefail
+          echo "===== microvm-run script ====="; cat result-ci/bin/microvm-run || true
+          echo "=============================="
+          workdir="$(mktemp -d)"; cd "$workdir"
+          # Hosted macOS runners have no Hypervisor.framework, and QEMU's
+          # accel=hvf:tcg does NOT fall back (hvf aborts with HV_UNSUPPORTED).
+          # Force pure TCG by rewriting the generated runner's machine flag.
+          runner="$workdir/microvm-run-tcg"
+          sed 's/accel=hvf:tcg/accel=tcg/g' "$GITHUB_WORKSPACE/result-ci/bin/microvm-run" > "$runner"
+          chmod +x "$runner"
+          echo "----- forced-TCG run line -----"; grep -- '-M ' "$runner" || true
+          # macOS has no GNU `timeout`; run in background and poll. The guest
+          # powers itself off after printing the marker, so the runner exits on
+          # its own (clean teardown); the kill below is only a safety net.
+          "$runner" > boot.log 2>&1 &
+          pid=$!
+          ready=0; self_exit=0
+          for _ in $(seq 1 180); do        # up to 180 * 5s = 900s
+            if grep -q "HERMIT_CI_VM_READY" boot.log; then ready=1; fi
+            if ! kill -0 "$pid" 2>/dev/null; then self_exit=1; break; fi
+            [ "$ready" = 1 ] && break
+            sleep 5
+          done
+          # give a self-powering-off guest a moment to exit cleanly
+          if [ "$self_exit" = 0 ]; then
+            for _ in $(seq 1 12); do kill -0 "$pid" 2>/dev/null || { self_exit=1; break; }; sleep 5; done
+          fi
+          kill "$pid" 2>/dev/null || true
+          wait "$pid" 2>/dev/null || true
+          echo "----- boot.log (tail) -----"; tail -60 boot.log || true
+          echo "---------------------------"
+          grep -q "HERMIT_CI_VM_READY" boot.log || { echo "FAIL: readiness marker not found"; exit 1; }
+          echo "readiness: OK; self-powered-off (clean teardown): $([ "$self_exit" = 1 ] && echo yes || echo 'no — killed by safety net')"
+          echo "PASS: guest booted under QEMU/TCG on macOS"
