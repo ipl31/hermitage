@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { homedir } from "node:os";
@@ -8,7 +8,7 @@ import { parseSecrets } from "../secrets";
 import { stateDir } from "../state";
 import { renderHostState } from "../render";
 import { preflight } from "../preflight";
-import { buildRunner, launchVm } from "../vm";
+import { buildRunner, launchVm, stopVm } from "../vm";
 import { pollStatus } from "../status";
 import type { Status } from "../status";
 
@@ -65,6 +65,11 @@ registerCommand("up", async (argv: string[], deps: CliDeps): Promise<number> => 
 
   deps.log("building microVM runner (this can take a while on first run)...");
   const runner = await buildRunner(deps);
+
+  // Stop any VM already running for this name, and clear a prior attempt's
+  // status so pollStatus waits for THIS boot rather than reading a stale phase.
+  await stopVm(deps, runner, paths).catch(() => {});
+  await rm(paths.statusFile, { force: true });
 
   deps.log("launching microVM...");
   const pid = await launchVm(deps, runner, paths);
