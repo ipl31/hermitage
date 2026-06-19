@@ -15,6 +15,10 @@ in {
       RemainAfterExit = true;
       ExecStart = "${pkgs.bun}/bin/bun run ${bootstrapSrc}/main.ts";
       TimeoutStartSec = "900";
+      # Surface bootstrap + hatch output on the serial console (captured by the
+      # host), not just the in-guest journal — the VM has no SSH/vsock.
+      StandardOutput = "journal+console";
+      StandardError = "journal+console";
     };
   };
 

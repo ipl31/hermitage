@@ -97,8 +97,10 @@ export async function main(): Promise<void> {
   setStatus("hatching");
   const prompt = String(cfg.hatch_prompt ?? "Use Quick setup with sensible defaults; proceed without asking questions.")
     + ` Agent name: ${cfg.agent_name ?? "Hermit"}. Timezone: ${cfg.timezone ?? "UTC"}. Target this project directory. Do not enable Docker.`;
+  // NOTE: --dangerously-skip-permissions and --permission-mode are mutually
+  // exclusive in the CLI. For unattended hatch we want the full bypass.
   await sh(["claude", "-p", `/claude-code-hermit:hatch ${prompt}`,
-    "--permission-mode", "acceptEdits", "--dangerously-skip-permissions",
+    "--dangerously-skip-permissions",
     "--model", "sonnet", "--output-format", "stream-json", "--verbose"], authEnv);
 
   // hatch must have produced the session launcher; if not, fail loudly.
