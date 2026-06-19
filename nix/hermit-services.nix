@@ -30,7 +30,7 @@ in {
       WorkingDirectory = "/var/lib/hermit/project";
       EnvironmentFile = "/run/hermit-runtime/agent.env";
       ExecStart = "/var/lib/hermit/project/.claude-code-hermit/bin/hermit-start --no-tmux";
-      ExecStartPost = "${pkgs.coreutils}/bin/sh -c 'printf \"{\\\"phase\\\":\\\"running\\\",\\\"ts\\\":%s}\" $(date +%s) > /run/hermit-runtime/status.json'";
+      ExecStartPost = "${pkgs.bash}/bin/bash -c 'printf \"{\\\"phase\\\":\\\"running\\\",\\\"ts\\\":%s}\" $(date +%s) > /run/hermit-runtime/status.json'";
       Restart = "always";
       RestartSec = "10";
     };
