@@ -18,6 +18,17 @@ in {
     };
   };
 
+  systemd.paths.hermit-auth-reload = {
+    wantedBy = [ "multi-user.target" ];
+    pathConfig.PathModified = "/run/hermit-runtime/agent.env";
+  };
+  systemd.services.hermit-auth-reload = {
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = "${pkgs.systemd}/bin/systemctl restart hermit-agent.service";
+    };
+  };
+
   systemd.services.hermit-agent = {
     description = "Hermit never-ending session";
     wantedBy = [ "multi-user.target" ];

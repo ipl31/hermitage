@@ -4,6 +4,7 @@ import "./commands/up";
 import "./commands/status";
 import "./commands/logs";
 import "./commands/down";
+import "./commands/reseed-auth";
 
 const deps: CliDeps = {
   log: (m) => console.log(m),
