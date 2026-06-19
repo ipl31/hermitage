@@ -13,7 +13,7 @@
 # at a different host package set than the guest. Used to build a darwin-hosted
 # qemu runner for the (aarch64-linux) guest so it can boot under QEMU+TCG on a
 # macOS CI runner. Leave null for a native Linux runner.
-{ nixpkgs, microvm, system, vmHostPackages ? null }:
+{ nixpkgs, microvm, system, hypervisor ? "qemu", vmHostPackages ? null }:
 let
   # serial console device differs by guest arch
   consoleDev = if nixpkgs.lib.hasPrefix "aarch64-" system then "ttyAMA0" else "ttyS0";
@@ -27,18 +27,18 @@ nixpkgs.lib.nixosSystem {
       system.stateVersion = "24.11";
 
       microvm = {
-        hypervisor = "qemu";
+        inherit hypervisor;
         vcpu = 2;
         mem = 1024;
         # Store on a disk image rather than a host virtiofs share, so no
-        # virtiofsd is required and the same image boots under KVM or TCG.
+        # virtiofsd is required and the same image boots under KVM/TCG/vfkit.
         storeOnDisk = true;
         graphics.enable = false;
       } // lib.optionalAttrs (vmHostPackages != null) {
         inherit vmHostPackages;
-        # On a darwin host the runner uses accel=hvf:tcg; a CI macOS runner has
-        # no Hypervisor.framework, so QEMU falls back to TCG. Under TCG `-cpu
-        # host` is invalid, so pin a concrete CPU (this also drops -enable-kvm).
+      } // lib.optionalAttrs (hypervisor == "qemu" && vmHostPackages != null) {
+        # On a darwin host the qemu runner is forced to TCG (no usable HVF);
+        # under TCG `-cpu host` is invalid, so pin a concrete CPU.
         cpu = "cortex-a72";
       };
 
