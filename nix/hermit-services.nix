@@ -93,7 +93,8 @@ in {
       EnvironmentFile = "/run/hermit-runtime/agent.env";
       ExecStart = "${agentLauncher}";
       ExecStartPost = "${setRunning}";
-      StandardOutput = "journal+console";
+      # Session stdout is voluminous → journal only; surface errors on the
+      # host-visible console.
       StandardError = "journal+console";
       Restart = "always";
       RestartSec = "10";
