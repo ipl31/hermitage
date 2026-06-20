@@ -81,6 +81,8 @@ in {
       EnvironmentFile = "/run/hermit-runtime/agent.env";
       ExecStart = "/var/lib/hermit/project/.claude-code-hermit/bin/hermit-start --no-tmux";
       ExecStartPost = "${setRunning}";
+      StandardOutput = "journal+console";
+      StandardError = "journal+console";
       Restart = "always";
       RestartSec = "10";
     };
