@@ -2,6 +2,14 @@
 let
   bootstrapSrc = ../guest/bootstrap;   # contains main.ts + lib.ts
   runtimePath = lib.makeBinPath (with pkgs; [ claude-code bun nodejs_22 git gh jq socat coreutils ]);
+  # Write status=running from a script file. (An inline systemd `bash -c` with
+  # `%s`/`date +%s` is wrong: systemd expands `%s` as a unit specifier before
+  # bash runs, producing invalid JSON. Script-file contents are not specifier-
+  # expanded, so printf/date work normally here.)
+  setRunning = pkgs.writeShellScript "hermit-set-running" ''
+    printf '{"phase":"running","ts":%s}' "$(${pkgs.coreutils}/bin/date +%s)" \
+      > /run/hermit-runtime/status.json
+  '';
 in {
   systemd.services.hermit-init = {
     description = "Hermit one-time bootstrap (pre-seed + hatch)";
@@ -15,6 +23,10 @@ in {
       RemainAfterExit = true;
       ExecStart = "${pkgs.bun}/bin/bun run ${bootstrapSrc}/main.ts";
       TimeoutStartSec = "900";
+      # Surface bootstrap + hatch output on the serial console (captured by the
+      # host), not just the in-guest journal — the VM has no SSH/vsock.
+      StandardOutput = "journal+console";
+      StandardError = "journal+console";
     };
   };
 
@@ -56,7 +68,7 @@ in {
       WorkingDirectory = "/var/lib/hermit/project";
       EnvironmentFile = "/run/hermit-runtime/agent.env";
       ExecStart = "/var/lib/hermit/project/.claude-code-hermit/bin/hermit-start --no-tmux";
-      ExecStartPost = "${pkgs.bash}/bin/bash -c 'printf \"{\\\"phase\\\":\\\"running\\\",\\\"ts\\\":%s}\" $(date +%s) > /run/hermit-runtime/status.json'";
+      ExecStartPost = "${setRunning}";
       Restart = "always";
       RestartSec = "10";
     };

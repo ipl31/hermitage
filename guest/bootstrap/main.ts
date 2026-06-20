@@ -20,7 +20,9 @@ function logLine(msg: string): void {
 async function sh(cmd: string[], env: Record<string, string>): Promise<void> {
   const proc = Bun.spawn(cmd, {
     cwd: PROJECT,
-    env: { ...process.env, ...env, CLAUDE_CONFIG_DIR: CONFIG_DIR },
+    // IS_SANDBOX=1 lets `claude --dangerously-skip-permissions` run as root,
+    // which it otherwise refuses. The microVM is a single-purpose sandbox.
+    env: { ...process.env, ...env, CLAUDE_CONFIG_DIR: CONFIG_DIR, IS_SANDBOX: "1" },
     stdout: "inherit", stderr: "inherit",
   });
   const code = await proc.exited;
@@ -97,8 +99,10 @@ export async function main(): Promise<void> {
   setStatus("hatching");
   const prompt = String(cfg.hatch_prompt ?? "Use Quick setup with sensible defaults; proceed without asking questions.")
     + ` Agent name: ${cfg.agent_name ?? "Hermit"}. Timezone: ${cfg.timezone ?? "UTC"}. Target this project directory. Do not enable Docker.`;
+  // NOTE: --dangerously-skip-permissions and --permission-mode are mutually
+  // exclusive in the CLI. For unattended hatch we want the full bypass.
   await sh(["claude", "-p", `/claude-code-hermit:hatch ${prompt}`,
-    "--permission-mode", "acceptEdits", "--dangerously-skip-permissions",
+    "--dangerously-skip-permissions",
     "--model", "sonnet", "--output-format", "stream-json", "--verbose"], authEnv);
 
   // hatch must have produced the session launcher; if not, fail loudly.
@@ -110,6 +114,8 @@ export async function main(): Promise<void> {
     ...authEnv, ...extraAgentEnv,
     CLAUDE_CONFIG_DIR: CONFIG_DIR,
     AGENT_HOOK_PROFILE: "standard",
+    // The session runs as root in this sandbox VM; allow the permission bypass.
+    IS_SANDBOX: "1",
   };
   if (secrets.GH_TOKEN) agentVars.GH_TOKEN = secrets.GH_TOKEN;
   writeFileSync(join(RUNTIME, "agent.env"), agentEnvContent(agentVars));
