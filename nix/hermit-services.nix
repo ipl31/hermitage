@@ -10,6 +10,12 @@ let
     printf '{"phase":"running","ts":%s}' "$(${pkgs.coreutils}/bin/date +%s)" \
       > /run/hermit-runtime/status.json
   '';
+  # Written by OnFailure when hermit-agent exceeds its restart limit, so the host
+  # sees `crashlooping` instead of a stale `running`.
+  setCrashlooping = pkgs.writeShellScript "hermit-set-crashlooping" ''
+    printf '{"phase":"crashlooping","ts":%s}' "$(${pkgs.coreutils}/bin/date +%s)" \
+      > /run/hermit-runtime/status.json
+  '';
 in {
   systemd.services.hermit-init = {
     description = "Hermit one-time bootstrap (pre-seed + hatch)";
@@ -63,6 +69,12 @@ in {
     after = [ "hermit-init.service" "network-online.target" ];
     wants = [ "network-online.target" ];
     environment.PATH = lib.mkForce runtimePath;
+    # If the session exits and restarts 5+ times within 5 min, stop trying and
+    # fire OnFailure -> crashlooping status (instead of a perpetual false
+    # `running` from ExecStartPost on each spawn).
+    startLimitIntervalSec = 300;
+    startLimitBurst = 5;
+    unitConfig.OnFailure = "hermit-agent-failed.service";
     serviceConfig = {
       Type = "simple";
       WorkingDirectory = "/var/lib/hermit/project";
@@ -72,5 +84,11 @@ in {
       Restart = "always";
       RestartSec = "10";
     };
+  };
+
+  # Fired by hermit-agent's OnFailure (restart limit exceeded) to record the
+  # crash-loop so `hermit-vm status`/`up` surface it.
+  systemd.services.hermit-agent-failed = {
+    serviceConfig = { Type = "oneshot"; ExecStart = "${setCrashlooping}"; };
   };
 }
