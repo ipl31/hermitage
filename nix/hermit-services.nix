@@ -5,8 +5,15 @@ let
   # tools, so bash + the usual userland must be on the service PATH.
   runtimePath = lib.makeBinPath (with pkgs; [
     claude-code bun nodejs_22 git gh jq socat
-    bash coreutils gnugrep gnused gawk findutils which
+    bash coreutils gnugrep gnused gawk findutils which util-linux
   ]);
+  # hermit-start runs an interactive `claude` session, which needs a TTY; under
+  # a systemd service there is none, so claude falls back to --print and errors.
+  # Allocate a pseudo-terminal with util-linux `script`.
+  agentLauncher = pkgs.writeShellScript "hermit-agent-launch" ''
+    exec ${pkgs.util-linux}/bin/script -qec \
+      "/var/lib/hermit/project/.claude-code-hermit/bin/hermit-start --no-tmux" /dev/null
+  '';
   # Write status=running from a script file. (An inline systemd `bash -c` with
   # `%s`/`date +%s` is wrong: systemd expands `%s` as a unit specifier before
   # bash runs, producing invalid JSON. Script-file contents are not specifier-
@@ -84,7 +91,7 @@ in {
       Type = "simple";
       WorkingDirectory = "/var/lib/hermit/project";
       EnvironmentFile = "/run/hermit-runtime/agent.env";
-      ExecStart = "/var/lib/hermit/project/.claude-code-hermit/bin/hermit-start --no-tmux";
+      ExecStart = "${agentLauncher}";
       ExecStartPost = "${setRunning}";
       StandardOutput = "journal+console";
       StandardError = "journal+console";
