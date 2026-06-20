@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync, copyFileSync, existsSync, chmodSync } from "node:fs";
+import { mkdirSync, writeFileSync, copyFileSync, existsSync, chmodSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { readEnvFiles, resolveAuth, claudeJson, agentEnvContent } from "./lib";
 
@@ -108,6 +108,12 @@ export async function main(): Promise<void> {
   // hatch must have produced the session launcher; if not, fail loudly.
   const starter = join(PROJECT, ".claude-code-hermit", "bin", "hermit-start");
   if (!existsSync(starter)) throw new Error("hatch did not create .claude-code-hermit/bin/hermit-start");
+
+  // hatch writes bin/* via the Write tool (mode 0644) and can't chmod them
+  // itself (no Bash in -p mode), so make them executable — otherwise systemd's
+  // ExecStart on hermit-start fails and hermit-agent crash-loops.
+  const binDir = join(PROJECT, ".claude-code-hermit", "bin");
+  for (const f of readdirSync(binDir)) chmodSync(join(binDir, f), 0o755);
 
   // ---- write the agent EnvironmentFile (host can later rewrite for reseed) ----
   const agentVars: Record<string, string> = {

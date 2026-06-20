@@ -28,12 +28,24 @@ export async function launchVm(_deps: CliDeps, runnerPath: string, paths: VmPath
 }
 
 export async function stopVm(deps: CliDeps, runnerPath: string, paths: VmPaths): Promise<void> {
+  // Try a graceful shutdown via the control socket first (best-effort).
   const shutdown = join(runnerPath, "bin", "microvm-shutdown");
-  const r = await deps.run(shutdown, [], { cwd: paths.root });
-  if (r.code === 0) { await appendFile(paths.logFile, "[hermit-vm] graceful shutdown sent\n"); return; }
-  // Fallback: kill the recorded PID.
+  await deps.run(shutdown, [], { cwd: paths.root }).catch(() => undefined);
+
+  // microvm-shutdown can report success while vfkit keeps running, and the
+  // recorded vm.pid is the `script` wrapper, not vfkit. So verify the vfkit
+  // process bound to THIS VM's control socket actually exits, then force-kill.
+  // Absolute paths: the packaged CLI runs with a restricted PATH.
+  const sockMatch = `vfkit.*${paths.socket}`;
+  for (let i = 0; i < 20; i++) {
+    const r = await deps.run("/usr/bin/pgrep", ["-f", sockMatch]);
+    if (r.code !== 0) { await appendFile(paths.logFile, "[hermit-vm] stopped\n"); return; }
+    await new Promise((res) => setTimeout(res, 500));
+  }
+  await deps.run("/usr/bin/pkill", ["-f", sockMatch]);
   try {
     const pid = parseInt(await readFile(join(paths.root, "vm.pid"), "utf8"), 10);
-    if (pid > 0) process.kill(pid, "SIGTERM");
+    if (pid > 0) process.kill(pid, "SIGKILL");
   } catch { /* already gone */ }
+  await appendFile(paths.logFile, "[hermit-vm] force-stopped\n");
 }

@@ -1,13 +1,31 @@
 { pkgs, lib, ... }:
 let
   bootstrapSrc = ../guest/bootstrap;   # contains main.ts + lib.ts
-  runtimePath = lib.makeBinPath (with pkgs; [ claude-code bun nodejs_22 git gh jq socat coreutils ]);
+  # hermit's bin/* scripts use `#!/usr/bin/env bash` and shell out to common
+  # tools, so bash + the usual userland must be on the service PATH.
+  runtimePath = lib.makeBinPath (with pkgs; [
+    claude-code bun nodejs_22 git gh jq socat
+    bash coreutils gnugrep gnused gawk findutils which util-linux
+  ]);
+  # hermit-start runs an interactive `claude` session, which needs a TTY; under
+  # a systemd service there is none, so claude falls back to --print and errors.
+  # Allocate a pseudo-terminal with util-linux `script`.
+  agentLauncher = pkgs.writeShellScript "hermit-agent-launch" ''
+    exec ${pkgs.util-linux}/bin/script -qec \
+      "/var/lib/hermit/project/.claude-code-hermit/bin/hermit-start --no-tmux" /dev/null
+  '';
   # Write status=running from a script file. (An inline systemd `bash -c` with
   # `%s`/`date +%s` is wrong: systemd expands `%s` as a unit specifier before
   # bash runs, producing invalid JSON. Script-file contents are not specifier-
   # expanded, so printf/date work normally here.)
   setRunning = pkgs.writeShellScript "hermit-set-running" ''
     printf '{"phase":"running","ts":%s}' "$(${pkgs.coreutils}/bin/date +%s)" \
+      > /run/hermit-runtime/status.json
+  '';
+  # Written by OnFailure when hermit-agent exceeds its restart limit, so the host
+  # sees `crashlooping` instead of a stale `running`.
+  setCrashlooping = pkgs.writeShellScript "hermit-set-crashlooping" ''
+    printf '{"phase":"crashlooping","ts":%s}' "$(${pkgs.coreutils}/bin/date +%s)" \
       > /run/hermit-runtime/status.json
   '';
 in {
@@ -63,14 +81,29 @@ in {
     after = [ "hermit-init.service" "network-online.target" ];
     wants = [ "network-online.target" ];
     environment.PATH = lib.mkForce runtimePath;
+    # If the session exits and restarts 5+ times within 5 min, stop trying and
+    # fire OnFailure -> crashlooping status (instead of a perpetual false
+    # `running` from ExecStartPost on each spawn).
+    startLimitIntervalSec = 300;
+    startLimitBurst = 5;
+    unitConfig.OnFailure = "hermit-agent-failed.service";
     serviceConfig = {
       Type = "simple";
       WorkingDirectory = "/var/lib/hermit/project";
       EnvironmentFile = "/run/hermit-runtime/agent.env";
-      ExecStart = "/var/lib/hermit/project/.claude-code-hermit/bin/hermit-start --no-tmux";
+      ExecStart = "${agentLauncher}";
       ExecStartPost = "${setRunning}";
+      # Session stdout is voluminous → journal only; surface errors on the
+      # host-visible console.
+      StandardError = "journal+console";
       Restart = "always";
       RestartSec = "10";
     };
+  };
+
+  # Fired by hermit-agent's OnFailure (restart limit exceeded) to record the
+  # crash-loop so `hermit-vm status`/`up` surface it.
+  systemd.services.hermit-agent-failed = {
+    serviceConfig = { Type = "oneshot"; ExecStart = "${setCrashlooping}"; };
   };
 }

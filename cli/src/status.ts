@@ -14,7 +14,7 @@ export async function pollStatus(paths: VmPaths, until: string, timeoutMs: numbe
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const s = await readStatus(paths);
-    if (s && (s.phase === until || s.phase === "error" || s.phase === "awaiting_pairing")) return s;
+    if (s && (s.phase === until || s.phase === "error" || s.phase === "crashlooping" || s.phase === "awaiting_pairing")) return s;
     await new Promise((r) => setTimeout(r, 500));
   }
   return readStatus(paths);
