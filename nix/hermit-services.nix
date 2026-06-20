@@ -1,7 +1,12 @@
 { pkgs, lib, ... }:
 let
   bootstrapSrc = ../guest/bootstrap;   # contains main.ts + lib.ts
-  runtimePath = lib.makeBinPath (with pkgs; [ claude-code bun nodejs_22 git gh jq socat coreutils ]);
+  # hermit's bin/* scripts use `#!/usr/bin/env bash` and shell out to common
+  # tools, so bash + the usual userland must be on the service PATH.
+  runtimePath = lib.makeBinPath (with pkgs; [
+    claude-code bun nodejs_22 git gh jq socat
+    bash coreutils gnugrep gnused gawk findutils which
+  ]);
   # Write status=running from a script file. (An inline systemd `bash -c` with
   # `%s`/`date +%s` is wrong: systemd expands `%s` as a unit specifier before
   # bash runs, producing invalid JSON. Script-file contents are not specifier-
